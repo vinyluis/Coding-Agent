@@ -1,0 +1,5 @@
+solution.py
+test_solution.py
+*.ipynb
+.*/
+__pycache__/
