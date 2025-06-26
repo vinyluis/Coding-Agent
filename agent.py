@@ -24,7 +24,7 @@ from langchain_core.tools import ToolException, tool
 from langgraph.graph import StateGraph, END
 
 # Configure maximum iterations to prevent infinite loops
-MAX_ITERATIONS = 3
+MAX_ITERATIONS = 8
 
 
 # Type definitions for the graph state
@@ -411,15 +411,26 @@ def write_code(state: State, llm) -> State:
   print("💻 Agent is writing the solution code...")
   messages = state["messages"]
   
+  problem_desc = state.get("problem_description", "")
+  
   # Add a prompt to write the code
   messages.append(
     HumanMessage(
-      content="""
-      Create a Python file that implements your solution.
-      Use a class structure and follow best practices for Python code.
-      The file should be saved as solution.py in the current directory.
+      content=f"""
+      Create a Python file that implements a solution for: {problem_desc}
       
-      Please outline the code structure before writing the full implementation.
+      Follow these guidelines:
+      1. Use a clear class structure with properly named methods
+      2. Follow Python best practices and PEP 8 style guidelines
+      3. Make sure method names accurately reflect what they do
+        - If a method is called filter_even(), it should filter for EVEN numbers
+        - If a method is called sort_ascending(), it should sort in ascending order
+      4. Include proper type hints
+      5. Add descriptive docstrings for the class and all methods
+      6. Handle edge cases appropriately (empty inputs, negative values, etc.)
+      7. The file should be saved as solution.py in the current directory
+      
+      First outline the class structure, then implement the complete solution.
       """
     )
   )
@@ -506,12 +517,25 @@ def write_tests(state: State, llm) -> State:
       content=f"""
       Now that we have the solution code, write comprehensive tests for it.
       The tests should use pytest and be saved as test_solution.py.
-      Make sure to test all aspects of the solution, including edge cases.
+      
+      Follow these guidelines for creating tests:
+      1. Create a clear test class structure with setup_method if needed
+      2. Write tests for each method in the solution
+      3. Include tests for edge cases: empty lists, negative numbers, large numbers, etc.
+      4. Create tests for specific scenarios the solution should handle
+      5. Make sure test assertions are clear and specific
+      6. Ensure that your test names clearly describe what they're testing
+      7. For each test method, include a docstring explaining what it tests
+      8. Make sure your tests have clear expected outputs for all assertions
       
       Here's the current solution code for reference:
       ```python
       {code_content}
       ```
+      
+      You MUST ensure your test expectations align with the intended functionality of each method. 
+      If a method is named filter_even(), then the tests should verify it filters for even numbers.
+      If a method needs to handle negative numbers, write a specific test for that case.
       """
     )
   )
@@ -616,6 +640,14 @@ def evaluate_results(state: State, llm) -> State:
   test_results = state["test_results"]
   iteration_count = state["iteration_count"] + 1
   
+  # Extract detailed information about test failures
+  failures = extract_test_failures(test_results)
+  
+  # Format failures for better readability
+  formatted_failures = ""
+  for test_name, details in failures.items():
+    formatted_failures += f"Test: {test_name}\nFailure details:\n{details}\n\n"
+    
   # Check if we've reached the maximum iterations
   if iteration_count >= MAX_ITERATIONS:
     print(f"⏰ Maximum iterations ({MAX_ITERATIONS}) reached!")
@@ -647,7 +679,7 @@ def evaluate_results(state: State, llm) -> State:
       "next": "end"
     }
   
-  # Add test results to the context
+  # Add test results to the context with detailed failure information
   messages.append(
     HumanMessage(
       content=f"""
@@ -655,12 +687,23 @@ def evaluate_results(state: State, llm) -> State:
       
       {test_results}
       
-      Based on these results, determine if:
-      1. The solution is correct (all tests pass)
-      2. The solution needs improvements
-      3. The tests need to be fixed
+      DETAILED TEST FAILURES:
+      {formatted_failures if formatted_failures else "No detailed failure information available."}
       
-      Please analyze the results and suggest next steps.
+      Analyze these failures carefully by comparing the expected vs. actual output.
+      Pay particular attention to:
+      
+      1. Method names vs. their actual behavior (e.g., a method called filter_even might need to filter for even numbers, not odd)
+      2. Edge cases in the tests (negative numbers, special values)
+      3. Specific assertions that are failing and exactly how the actual output differs from expected
+      4. Any inconsistencies between the test requirements and your implementation
+      
+      Based on your analysis, determine if:
+      1. The solution is correct (all tests pass)
+      2. The solution needs improvements (identify specific fixes needed)
+      3. There are misunderstandings between method names and their expected behavior
+      
+      Provide specific implementation fixes for each failing test case.
       """
     )
   )
@@ -699,6 +742,7 @@ def improve_code(state: State, llm) -> State:
   messages = state["messages"]
   code_file = state["code_file"]
   test_file = state["test_file"]
+  test_results = state["test_results"]
   
   if not code_file:
     print("❌ No code file specified!")
@@ -720,10 +764,27 @@ def improve_code(state: State, llm) -> State:
   code_content = read_file.invoke({"file_path": code_file})
   test_content = read_file.invoke({"file_path": test_file})
   
+  # Extract detailed test failure information
+  failures = extract_test_failures(test_results)
+  
+  # Format failures for better readability
+  formatted_failures = ""
+  for test_name, details in failures.items():
+    formatted_failures += f"Test: {test_name}\nFailure details:\n{details}\n\n"
+  
+  # Extract failing test names for more focused fixes
+  failing_tests = list(failures.keys())
+  failing_tests_str = "\n".join(failing_tests) if failing_tests else "Unknown test failures"
+  
   messages.append(
     HumanMessage(
       content=f"""
-      Let's improve the code to fix the failing tests.
+      Let's fix the failing tests in the solution. Here are the specific failing tests:
+      
+      {failing_tests_str}
+      
+      DETAILED TEST FAILURES:
+      {formatted_failures if formatted_failures else "No detailed failure information available."}
       
       Current solution code:
       ```python
@@ -735,7 +796,14 @@ def improve_code(state: State, llm) -> State:
       {test_content}
       ```
       
-      Please provide an improved version of the solution code.
+      When fixing the code, pay special attention to:
+      1. Make sure method names match their intended behavior in the tests
+      2. Fix the specific issues shown in the test failures (look at expected vs. actual values)
+      3. Look for edge cases the tests are checking (like negative numbers)
+      4. Examine test assertions carefully to understand the exact expected output
+      5. When in doubt, prioritize making the tests pass over keeping the current implementation
+      
+      Please provide a COMPLETE improved version of the solution code that will pass all tests.
       """
     )
   )
@@ -1025,6 +1093,46 @@ def clean_old_solution_files():
       print(f"✅ Removed existing test file: {test_path}")
   except Exception as e:
     print(f"⚠️ Warning during cleanup: {str(e)}")
+
+def extract_test_failures(test_results: Optional[str]) -> dict:
+  """
+  Extract detailed information about test failures from pytest output.
+  
+  Args:
+    test_results: The output from pytest
+    
+  Returns:
+    A dictionary with test names as keys and failure details as values
+  """
+  if not test_results:
+    return {}
+    
+  failures = {}
+  current_test = None
+  failure_details = []
+  capture_details = False
+  
+  for line in test_results.splitlines():
+    # Detect the start of a failing test
+    if line.startswith("___") and " FAILED " in line:
+      test_parts = line.replace("___", "").strip().split(" FAILED ")
+      if test_parts:
+        current_test = test_parts[0].strip()
+        capture_details = True
+        failure_details = []
+    
+    # Capture error message and assertion details
+    elif capture_details and "E       " in line:
+      cleaned_line = line.replace("E       ", "").strip()
+      if cleaned_line:
+        failure_details.append(cleaned_line)
+    
+    # End of a test failure section
+    elif current_test and line.strip() == "" and capture_details and failure_details:
+      failures[current_test] = "\n".join(failure_details)
+      capture_details = False
+  
+  return failures
 
 
 if __name__ == "__main__":
