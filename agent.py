@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import argparse
+import os.path as ospath
 from typing import TypedDict, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -19,12 +20,11 @@ try:
 except ImportError:
   # Optional dependency, will be None if not installed
   ChatBedrock = None
-from langchain_core.tools import tool, ToolException
+from langchain_core.tools import ToolException, tool
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint import LocalStateCheckpointRegistry
 
 # Configure maximum iterations to prevent infinite loops
-MAX_ITERATIONS = 5
+MAX_ITERATIONS = 3
 
 
 # Type definitions for the graph state
@@ -52,7 +52,10 @@ def read_file(file_path: str) -> str:
     The contents of the file as a string
   """
   try:
-    with open(file_path, "r") as f:
+    # Normalize the path to handle spaces and special characters
+    file_path = os.path.normpath(os.path.abspath(file_path))
+    
+    with open(file_path, "r", encoding='utf-8') as f:
       return f.read()
   except Exception as e:
     raise ToolException(f"Error reading file: {str(e)}")
@@ -70,10 +73,27 @@ def write_file(file_path: str, content: str) -> str:
     Confirmation message
   """
   try:
+    # Check if file_path is empty or None
+    if not file_path:
+      raise ValueError("File path cannot be empty")
+    
+    # Normalize the path to handle spaces and special characters
+    file_path = os.path.normpath(os.path.abspath(file_path))
+    
+    # If file_path is just a filename with no directory, use the current directory
+    if os.path.dirname(file_path) == '':
+      file_path = os.path.normpath(os.path.join(os.getcwd(), file_path))
+      print(f"Using absolute path: {file_path}")
+    
     # Ensure directory exists
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with open(file_path, "w") as f:
+    dir_path = os.path.dirname(file_path)
+    if dir_path:  # Only try to create directory if there is a directory component
+      os.makedirs(dir_path, exist_ok=True)
+      
+    # Write the file
+    with open(file_path, "w", encoding='utf-8') as f:
       f.write(content)
+    
     return f"Successfully wrote to {file_path}"
   except Exception as e:
     raise ToolException(f"Error writing to file: {str(e)}")
@@ -92,10 +112,13 @@ def edit_file(file_path: str, old_content: str, new_content: str) -> str:
     Confirmation message
   """
   try:
+    # Normalize the path to handle spaces and special characters
+    file_path = os.path.normpath(os.path.abspath(file_path))
+    
     if not os.path.exists(file_path):
       return f"Error: File {file_path} does not exist"
     
-    with open(file_path, "r") as f:
+    with open(file_path, "r", encoding='utf-8') as f:
       content = f.read()
     
     if old_content not in content:
@@ -103,7 +126,7 @@ def edit_file(file_path: str, old_content: str, new_content: str) -> str:
     
     updated_content = content.replace(old_content, new_content)
     
-    with open(file_path, "w") as f:
+    with open(file_path, "w", encoding='utf-8') as f:
       f.write(updated_content)
     
     return f"Successfully edited {file_path}"
@@ -148,10 +171,13 @@ def search_text(file_path: str, search_term: str) -> str:
     Lines containing the search term
   """
   try:
+    # Normalize the path to handle spaces and special characters
+    file_path = os.path.normpath(os.path.abspath(file_path))
+    
     if not os.path.exists(file_path):
       return f"Error: File {file_path} does not exist"
     
-    with open(file_path, "r") as f:
+    with open(file_path, "r", encoding='utf-8') as f:
       content = f.readlines()
     
     matches = [line.strip() for line in content if search_term in line]
@@ -175,8 +201,14 @@ def run_tests(test_file: str) -> str:
     Test results
   """
   try:
+    # Normalize the path to handle spaces and special characters
+    test_file = os.path.normpath(os.path.abspath(test_file))
+    
+    # Quote the path to handle spaces in subprocess
+    quoted_path = f'"{test_file}"'
+    
     result = subprocess.run(
-      f"python -m pytest {test_file} -v",
+      f"python -m pytest {quoted_path} -v",
       shell=True,
       text=True,
       capture_output=True
@@ -203,14 +235,71 @@ def list_directory(directory_path: str = "./") -> str:
     List of files in the directory
   """
   try:
+    # Normalize the path to handle spaces and special characters
+    directory_path = os.path.normpath(os.path.abspath(directory_path))
+    
     files = os.listdir(directory_path)
     return "\n".join(files)
   except Exception as e:
     raise ToolException(f"Error listing directory: {str(e)}")
 
+@tool
+def get_current_directory() -> str:
+  """
+  Get the current working directory.
+  
+  Returns:
+    The absolute path of the current working directory
+  """
+  try:
+    # Return normalized path to handle any inconsistencies
+    return os.path.normpath(os.getcwd())
+  except Exception as e:
+    raise ToolException(f"Error getting current directory: {str(e)}")
+
+@tool
+def change_directory(directory_path: str) -> str:
+  """
+  Change the current working directory.
+  
+  Args:
+    directory_path: Path to the directory to change to
+    
+  Returns:
+    Confirmation message
+  """
+  try:
+    # Normalize the path to handle spaces and special characters
+    directory_path = os.path.normpath(os.path.abspath(directory_path))
+    
+    os.chdir(directory_path)
+    return f"Changed working directory to {os.path.normpath(os.getcwd())}"
+  except Exception as e:
+    raise ToolException(f"Error changing directory: {str(e)}")
+
+@tool
+def ensure_directory(directory_path: str) -> str:
+  """
+  Ensure a directory exists, creating it if necessary.
+  
+  Args:
+    directory_path: Path to the directory to ensure exists
+    
+  Returns:
+    Confirmation message
+  """
+  try:
+    # Normalize the path to handle spaces and special characters
+    directory_path = os.path.normpath(os.path.abspath(directory_path))
+    
+    os.makedirs(directory_path, exist_ok=True)
+    return f"Ensured directory exists: {directory_path}"
+  except Exception as e:
+    raise ToolException(f"Error ensuring directory exists: {str(e)}")
+
 # Define agent nodes
 
-def create_llm(temperature: float = 0.0, model_name: str = "gpt-4o", provider: str = "openai"):
+def create_llm(temperature: float = 0.0, model_name: str = "gpt-4o-mini", provider: str = "openai"):
   """Create a language model.
   
   Args:
@@ -221,17 +310,22 @@ def create_llm(temperature: float = 0.0, model_name: str = "gpt-4o", provider: s
   Returns:
     A language model instance
   """
-  if provider.lower() == "bedrock" and ChatBedrock is not None:
-    return ChatBedrock(
-      model_id=model_name,
-      temperature=temperature
-    )
-  else:
-    # Default to OpenAI
-    return ChatOpenAI(
-      temperature=temperature,
-      model_name=model_name
-    )
+  try:
+    if provider.lower() == "bedrock" and ChatBedrock is not None:
+      return ChatBedrock(
+        model=model_name,
+        temperature=temperature
+      )
+    else:
+      # Default to OpenAI
+      return ChatOpenAI(
+        temperature=temperature,
+        model=model_name
+      )
+  except Exception as e:
+    print(f"❌ Error initializing the language model: {str(e)}")
+    print(f"Provider: {provider}, Model: {model_name}")
+    raise
 
 def get_system_prompt():
   return """You are a professional coding agent that solves programming problems.
@@ -277,6 +371,7 @@ def initialize_state(state: State) -> State:
 
 def think(state: State, llm) -> State:
   """Think about the problem and plan the solution approach."""
+  print("🤔 Agent is thinking about the problem...")
   messages = state["messages"]
   
   # Add a thinking prompt
@@ -299,6 +394,12 @@ def think(state: State, llm) -> State:
   thinking_response = llm.invoke(messages)
   messages.append(thinking_response)
   
+  # Log the thinking process
+  print("💭 Agent's thinking process:")
+  print("-" * 50)
+  print(thinking_response.content)
+  print("-" * 50)
+  
   return {
     **state,
     "messages": messages,
@@ -307,6 +408,7 @@ def think(state: State, llm) -> State:
 
 def write_code(state: State, llm) -> State:
   """Write the solution code in a Python file."""
+  print("💻 Agent is writing the solution code...")
   messages = state["messages"]
   
   # Add a prompt to write the code
@@ -326,13 +428,25 @@ def write_code(state: State, llm) -> State:
   code_response = llm.invoke(messages)
   messages.append(code_response)
   
+  # Log the code generation process
+  print("🔧 Agent's code generation:")
+  print("-" * 50)
+  print(code_response.content)
+  print("-" * 50)
+  
   # Extract code from the AI response
   code_blocks = re.findall(r"```python\n(.*?)```", code_response.content, re.DOTALL)
   if code_blocks:
     code = code_blocks[0]
-    # Write the solution file
-    file_path = "solution.py"
-    write_file(file_path, code)
+    # Get current directory and create absolute path
+    current_dir = get_current_directory.invoke({})
+    file_path = os.path.normpath(os.path.join(current_dir, "solution.py"))
+    print(f"📂 Current directory: {current_dir}")
+    print(f"📄 Writing solution to: {file_path}")
+    
+    # Use the invoke method with proper parameter format
+    write_file.invoke({"file_path": file_path, "content": code})
+    print(f"✅ Solution code written to {file_path}")
     
     return {
       **state,
@@ -342,6 +456,7 @@ def write_code(state: State, llm) -> State:
     }
   else:
     # If no code blocks found, ask for clarification
+    print("⚠️ No code block found, asking for clarification...")
     messages.append(
       HumanMessage(
         content="I couldn't find a Python code block in your response. Please provide the solution code in a Python code block (```python)."
@@ -355,9 +470,14 @@ def write_code(state: State, llm) -> State:
     code_blocks = re.findall(r"```python\n(.*?)```", clarification_response.content, re.DOTALL)
     if code_blocks:
       code = code_blocks[0]
-      # Write the solution file
-      file_path = "solution.py"
-      write_file(file_path, code)
+      # Get current directory and create absolute path
+      current_dir = get_current_directory.invoke({})
+      file_path = os.path.normpath(os.path.join(current_dir, "solution.py"))
+      print(f"📂 Current directory: {current_dir}")
+      print(f"📄 Writing solution to: {file_path}")
+      
+      write_file.invoke({"file_path": file_path, "content": code})
+      print(f"✅ Solution code written to {file_path}")
       
       return {
         **state,
@@ -366,6 +486,7 @@ def write_code(state: State, llm) -> State:
         "next": "write_tests"
       }
     else:
+      print("❌ Still no code block found, retrying...")
       return {
         **state,
         "messages": messages,
@@ -374,10 +495,11 @@ def write_code(state: State, llm) -> State:
 
 def write_tests(state: State, llm) -> State:
   """Write tests for the solution."""
+  print("🧪 Agent is writing tests for the solution...")
   messages = state["messages"]
   
   # Add the code file to the context
-  code_content = read_file(state["code_file"])
+  code_content = read_file.invoke({"file_path": state["code_file"]})
   
   messages.append(
     HumanMessage(
@@ -398,13 +520,24 @@ def write_tests(state: State, llm) -> State:
   test_response = llm.invoke(messages)
   messages.append(test_response)
   
+  # Log the test generation process
+  print("🔍 Agent's test generation:")
+  print("-" * 50)
+  print(test_response.content)
+  print("-" * 50)
+  
   # Extract test code from the AI response
   test_blocks = re.findall(r"```python\n(.*?)```", test_response.content, re.DOTALL)
   if test_blocks:
     test_code = test_blocks[0]
-    # Write the test file
-    file_path = "test_solution.py"
-    write_file(file_path, test_code)
+    # Get current directory and create absolute path
+    current_dir = get_current_directory.invoke({})
+    file_path = os.path.normpath(os.path.join(current_dir, "test_solution.py"))
+    print(f"📂 Current directory: {current_dir}")
+    print(f"📄 Writing tests to: {file_path}")
+    
+    write_file.invoke({"file_path": file_path, "content": test_code})
+    print(f"✅ Test code written to {file_path}")
     
     return {
       **state,
@@ -427,9 +560,13 @@ def write_tests(state: State, llm) -> State:
     test_blocks = re.findall(r"```python\n(.*?)```", clarification_response.content, re.DOTALL)
     if test_blocks:
       test_code = test_blocks[0]
-      # Write the test file
-      file_path = "test_solution.py"
-      write_file(file_path, test_code)
+      # Get current directory and create absolute path
+      current_dir = get_current_directory.invoke({})
+      file_path = os.path.normpath(os.path.join(current_dir, "test_solution.py"))
+      print(f"📂 Current directory: {current_dir}")
+      print(f"📄 Writing tests to: {file_path}")
+      
+      write_file.invoke({"file_path": file_path, "content": test_code})
       
       return {
         **state,
@@ -446,10 +583,25 @@ def write_tests(state: State, llm) -> State:
 
 def execute_tests(state: State) -> State:
   """Run the tests and capture results."""
+  print("🏃 Running tests...")
   test_file = state["test_file"]
   
+  if not test_file:
+    print("❌ No test file specified!")
+    return {
+      **state,
+      "test_results": "ERROR: No test file specified",
+      "next": "evaluate_results"
+    }
+  
   # Run the tests
-  test_results = run_tests(test_file)
+  test_results = run_tests.invoke({"test_file": test_file})
+  
+  # Log test results
+  print("📊 Test results:")
+  print("-" * 50)
+  print(test_results)
+  print("-" * 50)
   
   return {
     **state,
@@ -459,12 +611,14 @@ def execute_tests(state: State) -> State:
 
 def evaluate_results(state: State, llm) -> State:
   """Evaluate the test results and decide next steps."""
+  print("📈 Agent is evaluating test results...")
   messages = state["messages"]
   test_results = state["test_results"]
   iteration_count = state["iteration_count"] + 1
   
   # Check if we've reached the maximum iterations
   if iteration_count >= MAX_ITERATIONS:
+    print(f"⏰ Maximum iterations ({MAX_ITERATIONS}) reached!")
     messages.append(
       HumanMessage(
         content=f"""
@@ -480,6 +634,11 @@ def evaluate_results(state: State, llm) -> State:
     
     final_response = llm.invoke(messages)
     messages.append(final_response)
+    
+    print("📝 Final evaluation:")
+    print("-" * 50)
+    print(final_response.content)
+    print("-" * 50)
     
     return {
       **state,
@@ -510,8 +669,15 @@ def evaluate_results(state: State, llm) -> State:
   evaluation_response = llm.invoke(messages)
   messages.append(evaluation_response)
   
+  # Log the evaluation
+  print("🔍 Agent's evaluation:")
+  print("-" * 50)
+  print(evaluation_response.content)
+  print("-" * 50)
+  
   # Check if all tests pass
-  if "FAILED" not in test_results and "ERROR" not in test_results:
+  if test_results and "FAILED" not in test_results and "ERROR" not in test_results:
+    print("✅ All tests passed! Solution is complete.")
     return {
       **state,
       "messages": messages,
@@ -519,6 +685,7 @@ def evaluate_results(state: State, llm) -> State:
       "next": "end"
     }
   else:
+    print("🔄 Tests failed, need to improve code...")
     return {
       **state,
       "messages": messages,
@@ -528,13 +695,30 @@ def evaluate_results(state: State, llm) -> State:
 
 def improve_code(state: State, llm) -> State:
   """Improve the code based on test results."""
+  print("🔧 Agent is improving the code based on test failures...")
   messages = state["messages"]
   code_file = state["code_file"]
   test_file = state["test_file"]
   
+  if not code_file:
+    print("❌ No code file specified!")
+    return {
+      **state,
+      "messages": messages,
+      "next": "write_code"
+    }
+  
+  if not test_file:
+    print("❌ No test file specified!")
+    return {
+      **state,
+      "messages": messages,
+      "next": "write_tests"
+    }
+  
   # Get the current code and test content
-  code_content = read_file(code_file)
-  test_content = read_file(test_file)
+  code_content = read_file.invoke({"file_path": code_file})
+  test_content = read_file.invoke({"file_path": test_file})
   
   messages.append(
     HumanMessage(
@@ -564,8 +748,14 @@ def improve_code(state: State, llm) -> State:
   improved_code_blocks = re.findall(r"```python\n(.*?)```", improved_response.content, re.DOTALL)
   if improved_code_blocks:
     improved_code = improved_code_blocks[0]
+    # Check if code_file is a full path
+    if not os.path.isabs(code_file):
+      current_dir = get_current_directory.invoke({})
+      code_file = os.path.normpath(os.path.join(current_dir, code_file))
+      print(f"📂 Using absolute path for code file: {code_file}")
+    
     # Write the improved solution file
-    write_file(code_file, improved_code)
+    write_file.invoke({"file_path": code_file, "content": improved_code})
     
     return {
       **state,
@@ -587,8 +777,14 @@ def improve_code(state: State, llm) -> State:
     improved_code_blocks = re.findall(r"```python\n(.*?)```", clarification_response.content, re.DOTALL)
     if improved_code_blocks:
       improved_code = improved_code_blocks[0]
+      # Check if code_file is a full path
+      if not os.path.isabs(code_file):
+        current_dir = get_current_directory.invoke({})
+        code_file = os.path.normpath(os.path.join(current_dir, code_file))
+        print(f"📂 Using absolute path for code file: {code_file}")
+      
       # Write the improved solution file
-      write_file(code_file, improved_code)
+      write_file.invoke({"file_path": code_file, "content": improved_code})
       
       return {
         **state,
@@ -604,10 +800,13 @@ def improve_code(state: State, llm) -> State:
 
 def router(state: State) -> str:
   """Route to the next node based on the state."""
-  return state["next"]
+  next_step = state.get("next")
+  if next_step is None:
+    return "end"  # Default fallback
+  return next_step
 
 # Build the agent graph
-def build_agent():
+def build_agent(checkpointer=None):
   """Build and return the agent graph."""
   builder = StateGraph(State)
   
@@ -626,7 +825,6 @@ def build_agent():
   builder.add_edge("write_code", "write_tests")
   builder.add_edge("write_tests", "run_tests")
   builder.add_edge("run_tests", "evaluate_results")
-  builder.add_edge("evaluate_results", router)
   builder.add_edge("improve_code", "run_tests")
   
   # Add conditional edges from router
@@ -639,8 +837,14 @@ def build_agent():
     }
   )
   
-  # Create the graph
-  return builder.compile()
+  # Set entry point
+  builder.set_entry_point("initialize")
+  
+  # Create the graph with optional checkpointer
+  if checkpointer:
+    return builder.compile(checkpointer=checkpointer)
+  else:
+    return builder.compile()
 
 # Main function to run the agent
 def main():
@@ -667,7 +871,7 @@ def main():
   parser.add_argument(
     "--model",
     type=str,
-    default="gpt-4o" if ChatBedrock is None else "anthropic.claude-3-sonnet-20240229-v1:0",
+    default="gpt-4o-mini",
     help="Model name to use"
   )
   parser.add_argument(
@@ -680,6 +884,17 @@ def main():
   args = parser.parse_args()
   
   print("🤖 Initializing Coding Agent...")
+  print(f"🔧 Using model: {args.model}")
+  print(f"🔧 Using provider: {args.provider}")
+  print(f"🔧 Temperature: {args.temperature}")
+  
+  # Check for OpenAI API key if using OpenAI
+  if args.provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
+    print("❌ Error: OPENAI_API_KEY environment variable not set")
+    print("Please set your OpenAI API key by running:")
+    print("export OPENAI_API_KEY=your_api_key (on Linux/Mac)")
+    print("set OPENAI_API_KEY=your_api_key (on Windows)")
+    return
   
   # Update the LLM creator with user preferences
   global create_llm
@@ -695,8 +910,19 @@ def main():
   
   create_llm = new_create_llm
   
+  print("🔄 Building agent graph...")
+  
+  # Clean up any existing solution files
+  clean_old_solution_files()
+  
   # Build the agent
-  agent = build_agent()
+  try:
+    # Don't use checkpointer at all, it's causing issues
+    agent = build_agent(None)
+    print("✅ Agent graph built successfully")
+  except Exception as e:
+    print(f"❌ Error building agent: {e}")
+    return
   
   # Create initial state
   initial_state = {
@@ -710,44 +936,97 @@ def main():
     "next": None
   }
   
-  # Create checkpoint registry
-  checkpointer = LocalStateCheckpointRegistry()
-  
   # Run the agent with event tracer for logging
   print(f"🧠 Working on problem: {args.problem}")
   
-  for event in agent.stream(initial_state, checkpointer=checkpointer):
-    if event["type"] == "on_chain_start":
-      print(f"⚙️ Starting: {event['name']}")
-    elif event["type"] == "on_chain_end":
-      print(f"✅ Completed: {event['name']}")
-    elif event["type"] == "on_chain_error":
-      print(f"❌ Error in {event['name']}: {event['error']}")
+  # Stream the graph execution
+  final_state = None
   
-  # Print final summary
-  final_state = event["data"]
+  try:
+    print("🚀 Starting agent execution...")
+    
+    # Create a simplified config that doesn't use checkpointer
+    config = None
+    
+    print("🔄 Starting stream execution...")
+    all_step_outputs = []
+    
+    try:
+      for step_output in agent.stream(initial_state, config=config):
+        # Store each output to debug later if needed
+        all_step_outputs.append(step_output)
+        
+        # Each step_output is a dictionary with node names as keys
+        for node_name, node_state in step_output.items():
+          print(f"🔄 Completed step: {node_name}")
+          final_state = node_state
+      
+      print("🎯 Agent execution completed successfully")
+    except ValueError as e:
+      if "Checkpointer" in str(e):
+        print(f"❌ Error with checkpointer: {e}")
+        print("Attempting to run without config...")
+        # Try again without any config
+        for step_output in agent.stream(initial_state):
+          # Each step_output is a dictionary with node names as keys
+          for node_name, node_state in step_output.items():
+            print(f"🔄 Completed step: {node_name}")
+            final_state = node_state
+      else:
+        raise
+  except Exception as e:
+    print(f"❌ Error during agent execution: {e}")
+    import traceback
+    traceback.print_exc()
+    return
   
   print("\n" + "=" * 50)
   print("🎉 Solution Process Complete!")
   print("=" * 50)
   
-  print(f"📄 Solution file: {final_state['code_file']}")
-  print(f"🧪 Test file: {final_state['test_file']}")
-  
-  # Summary of test results
-  if "test_results" in final_state and final_state["test_results"]:
-    print("\n🧪 Final Test Results:")
-    print("-" * 50)
-    print(final_state["test_results"])
-  
-  print("\n📝 Summary:")
-  if final_state["next"] == "end" and "ERROR" not in final_state.get("test_results", "") and "FAILED" not in final_state.get("test_results", ""):
-    print("✅ All tests passed. The solution is complete.")
+  if final_state:
+    print(f"📄 Solution file: {final_state.get('code_file', 'N/A')}")
+    print(f"🧪 Test file: {final_state.get('test_file', 'N/A')}")
+    
+    # Summary of test results
+    if final_state.get("test_results"):
+      print("\n🧪 Final Test Results:")
+      print("-" * 50)
+      print(final_state["test_results"])
+    
+    print("\n📝 Summary:")
+    test_results = final_state.get("test_results", "")
+    if final_state.get("next") == "end" and "ERROR" not in test_results and "FAILED" not in test_results:
+      print("✅ All tests passed. The solution is complete.")
+    else:
+      print(f"⚠️ Solution completed with {final_state.get('iteration_count', 0)} iterations but some tests may be failing.")
   else:
-    print(f"⚠️ Solution completed with {final_state['iteration_count']} iterations but some tests may be failing.")
+    print("❌ No final state available.")
   
   print("\nYou can find the solution in 'solution.py' and the tests in 'test_solution.py'.")
 
+def clean_old_solution_files():
+  """
+  Clean up any existing solution and test files before running the agent.
+  This helps prevent conflicts with previous runs.
+  """
+  print("🧹 Cleaning up any existing solution files...")
+  try:
+    current_dir = get_current_directory.invoke({})
+    solution_path = os.path.normpath(os.path.join(current_dir, "solution.py"))
+    test_path = os.path.normpath(os.path.join(current_dir, "test_solution.py"))
+    
+    if os.path.exists(solution_path):
+      os.remove(solution_path)
+      print(f"✅ Removed existing solution file: {solution_path}")
+    
+    if os.path.exists(test_path):
+      os.remove(test_path)
+      print(f"✅ Removed existing test file: {test_path}")
+  except Exception as e:
+    print(f"⚠️ Warning during cleanup: {str(e)}")
+
 
 if __name__ == "__main__":
+  clean_old_solution_files()
   main()
