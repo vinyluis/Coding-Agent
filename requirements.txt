@@ -4,3 +4,5 @@ langchain>=0.1.4
 langgraph>=0.0.24
 pytest>=7.0.0
 langchain-aws>=0.1.2  # Optional for AWS Bedrock support
+pandas>=2.0.0
+scikit-learn>=1.2.0

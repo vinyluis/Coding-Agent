@@ -8,16 +8,12 @@ import sys
 import subprocess
 
 def main():
-    """Run the coding agent with a sample problem."""
+    """Run the coding agent with a factorial calculation problem."""
     problem = "Create a class that calculates the factorial of a positive integer"
     
     try:
-        # Path to the agent.py file
-        agent_path = os.path.join(os.path.dirname(__file__), 'agent.py')
-        
-        print("Installing required dependencies...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", 
-                              os.path.join(os.path.dirname(__file__), "requirements.txt")])
+        # Path to the agent.py file (one directory up from Examples)
+        agent_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'agent.py')
         
         print("\nRunning coding agent...")
         cmd = [sys.executable, agent_path, problem]

@@ -1,0 +1,18 @@
+{
+  "max_iterations": 8,
+  "llm_settings": {
+    "default_model": "gpt-4o-mini",
+    "default_provider": "openai",
+    "default_temperature": 0.0
+  },
+  "agent_settings": {
+    "verbose_logging": true,
+    "cleanup_old_files": true,
+    "recursion_limit": 50
+  },
+  "graph_settings": {
+    "recursion_limit": 50,
+    "max_retries": 3,
+    "use_checkpointing": true
+  }
+}
